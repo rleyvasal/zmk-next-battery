@@ -40,6 +40,6 @@ with the same information, in case a crowded menu bar (or the notch) hides the i
   peripheral's level `Peripheral 0`. The Totem fork swaps the levels for Mighty Mitts and labels
   the central's `Left`. Both layouts are handled. Devices with no described level, such as
   headphones, are ignored.
-- **USB** never holds the serial port. Every minute it skips the port if another app (such as
+- **USB** never holds the serial port. Every 10 seconds it skips the port if another app (such as
   the configurator) has it open; otherwise it opens it for about a second.
 - Logs: `log stream --predicate 'subsystem == "io.github.rleyvasal.zmk-battery"'`

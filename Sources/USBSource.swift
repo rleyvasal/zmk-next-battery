@@ -12,7 +12,7 @@ final class USBSource {
     /// ZMK's default USB IDs (the Open Source Hardware vendor ID and ZMK's product ID).
     static let zmkVendorID = 0x1D50
     static let zmkProductID = 0x615E
-    static let pollInterval: TimeInterval = 60
+    static let pollInterval: TimeInterval = 10
     static let replyTimeout: TimeInterval = 1.5
     /// How long to keep reading after the first battery frame, for a fresher one behind it.
     static let settleAfterFirstReply: TimeInterval = 0.4
