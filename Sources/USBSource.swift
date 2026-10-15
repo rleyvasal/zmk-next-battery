@@ -14,6 +14,8 @@ final class USBSource {
     static let zmkProductID = 0x615E
     static let pollInterval: TimeInterval = 60
     static let replyTimeout: TimeInterval = 1.5
+    /// How long to keep reading after the first battery frame, for a fresher one behind it.
+    static let settleAfterFirstReply: TimeInterval = 0.4
 
     private let model: BatteryModel
     private let queue = DispatchQueue(label: "zmk-battery.usb")
@@ -128,9 +130,13 @@ final class USBSource {
         guard request.withUnsafeBytes({ write(fd, $0.baseAddress, $0.count) }) == request.count
         else { return .failure("Write to keyboard failed") }
 
+        // The keyboard may still hold battery frames it queued before this port was last open
+        // (for example from before the cable was unplugged), and they come out ahead of the
+        // reply. So after the first battery frame, read a little longer and keep the last one.
         var deframer = Deframer()
         var buffer = [UInt8](repeating: 0, count: 512)
-        let deadline = Date().addingTimeInterval(timeout)
+        var deadline = Date().addingTimeInterval(timeout)
+        var latest: BatterySnapshot?
         while Date() < deadline {
             var fds = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
             let remainingMs = Int32(max(1, deadline.timeIntervalSinceNow * 1000))
@@ -139,10 +145,14 @@ final class USBSource {
             if n <= 0 { continue }
             for frame in deframer.feed(Array(buffer[0..<n])) {
                 if let snapshot = BatterySnapshot(frame: frame) {
-                    return .success(snapshot)
+                    if latest == nil {
+                        deadline = min(deadline, Date().addingTimeInterval(Self.settleAfterFirstReply))
+                    }
+                    latest = snapshot
                 }
             }
         }
+        if let latest { return .success(latest) }
         return .failure("No battery reply (firmware without zmk-studio-log, or Studio not on USB)")
     }
 }
