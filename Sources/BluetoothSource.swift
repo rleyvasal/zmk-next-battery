@@ -19,10 +19,14 @@ final class BluetoothSource: NSObject, CBCentralManagerDelegate, CBPeripheralDel
     static let userDescription = CBUUID(string: "2901")
     static let rescanInterval: TimeInterval = 30
     static let rereadInterval: TimeInterval = 5 * 60
+    /// A connect still pending after this long is cancelled and started again.
+    static let connectRetryAfter: TimeInterval = 20
 
     private let model: BatteryModel
     private var central: CBCentralManager!
     private var keyboards: [UUID: CBPeripheral] = [:]
+    /// When each keyboard's latest connect was started.
+    private var connectStarted: [UUID: Date] = [:]
     /// Each battery level's User Description once known; .some(nil) means it has none.
     private var descriptions: [ObjectIdentifier: String?] = [:]
     /// Latest value of each battery level, kept until its half can be decided.
@@ -78,9 +82,25 @@ final class BluetoothSource: NSObject, CBCentralManagerDelegate, CBPeripheralDel
             .map(\.identifier))
         let candidates = hid.isEmpty ? withBattery : withBattery.filter { hid.contains($0.identifier) }
         log.notice("Bluetooth: \(withBattery.count) connected with battery \(withBattery.map { $0.name ?? "?" }, privacy: .public), \(hid.count) HID, \(candidates.count) candidates")
-        for peripheral in candidates where keyboards[peripheral.identifier] == nil {
+        let now = Date()
+        for peripheral in candidates {
+            if let known = keyboards[peripheral.identifier] {
+                // A connect started while the link couldn't encrypt (the keyboard on USB, or
+                // serving another profile) can stay pending after macOS reconnects it, and the
+                // levels are never read. Cancel one still not connected after a while; the next
+                // scan connects afresh. (Cancelling calls didDisconnect, which forgets it.)
+                if known.state != .connected,
+                   now.timeIntervalSince(connectStarted[peripheral.identifier] ?? .distantPast)
+                       >= Self.connectRetryAfter {
+                    log.notice("Bluetooth: retrying connect to \(peripheral.name ?? "?", privacy: .public) (state \(known.state.rawValue))")
+                    keyboards[peripheral.identifier] = nil
+                    central.cancelPeripheralConnection(known)
+                }
+                continue
+            }
             keyboards[peripheral.identifier] = peripheral
             peripheral.delegate = self
+            connectStarted[peripheral.identifier] = now
             central.connect(peripheral)
         }
         if keyboards.isEmpty {
