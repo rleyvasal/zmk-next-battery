@@ -34,6 +34,10 @@ let lines: [(String, BatterySnapshot?)] = [
     ("left=usb right=--", BatterySnapshot(left: nil, leftOnUSB: true, right: nil)),
     ("left=64 right=15", BatterySnapshot(left: 64, leftOnUSB: false, right: 15)),
     ("left=64 right=--", BatterySnapshot(left: 64, leftOnUSB: false, right: nil)),
+    // The right half on USB (its Battery Level Status says charging).
+    ("left=64 right=15 usb", BatterySnapshot(left: 64, leftOnUSB: false, right: 15, rightOnUSB: true)),
+    ("left=78 usb right=15 usb", BatterySnapshot(left: 78, leftOnUSB: true, right: 15, rightOnUSB: true)),
+    ("left=usb right=15 usb", BatterySnapshot(left: nil, leftOnUSB: true, right: 15, rightOnUSB: true)),
     ("totem_log t=30s usb=1", nil),
     ("left=abc right=1", nil),
 ]
@@ -52,6 +56,26 @@ check(BatteryRoles.half(description: nil, siblings: [nil, "Peripheral 0"]) == .l
       "upstream: plain level is left")
 check(BatteryRoles.half(description: nil, siblings: [nil]) == nil, "single plain level: not a split")
 check(BatteryRoles.half(description: nil, siblings: [nil, "Case"]) == nil, "unknown description: undecided")
+
+// Battery Level Status (0x2BED) as Zephyr's BAS sends it: flags, then Power State (LE).
+// Charge State is bits 5-6: 1 << 5 = 0x20 charging, 2 << 5 = 0x40 discharging.
+check(BatteryLevelStatus.charging([0x00, 0x20, 0x00]) == true, "0x2BED: charging")
+check(BatteryLevelStatus.charging([0x00, 0x40, 0x00]) == false, "0x2BED: discharging (active)")
+check(BatteryLevelStatus.charging([0x00, 0x60, 0x00]) == false, "0x2BED: discharging (inactive)")
+check(BatteryLevelStatus.charging([0x00, 0x00, 0x00]) == nil, "0x2BED: unknown")
+check(BatteryLevelStatus.charging([0x02, 0x23, 0x0E, 0x55]) == true, "0x2BED: other bits and fields ignored")
+check(BatteryLevelStatus.charging([0x00, 0x20]) == nil, "0x2BED: too short")
+
+// A snapshot with the right half on USB marks it charging, so the title shows ⚡.
+let model = MainActor.assumeIsolated { BatteryModel(notifications: false) }
+MainActor.assumeIsolated {
+    model.apply(BatterySnapshot(line: "left=64 right=15 usb")!)
+    check(model.readings[.right]?.charging == true, "right=15 usb: right charging")
+    check(model.readings[.left]?.charging == false, "left=64: left not charging")
+    check(model.title == "L 64% R 15%⚡", "title shows ⚡ for the right, got \(model.title)")
+    model.apply(BatterySnapshot(line: "left=64 right=15")!)
+    check(model.title == "L 64% R 15%!", "off USB at 15%: low marker, got \(model.title)")
+}
 
 // Low-battery alerts: once per threshold, re-armed only after recovering past the hysteresis.
 var alerts = LowBatteryAlerts()

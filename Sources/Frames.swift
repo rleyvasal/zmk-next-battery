@@ -3,7 +3,8 @@
 // Frames use ZMK Studio's framing: SOF 0xAB, ESC 0xAC (escapes the next byte), EOF 0xAD.
 // The first payload byte is the frame type:
 //   'G' '1'  host -> keyboard: send a battery snapshot now
-//   'K' text keyboard -> host: battery snapshot, e.g. "left=78 usb right=15"
+//   'K' text keyboard -> host: battery snapshot, e.g. "left=78 usb right=15" ("usb" after a
+//       level: that half is on USB, and the level is its last reading on battery)
 //   'B' text keyboard -> host: the same, from Totem firmware before zmk-studio-log
 import Foundation
 
@@ -64,14 +65,17 @@ struct BatterySnapshot: Equatable {
     var left: Int?
     var leftOnUSB: Bool
     /// Right (peripheral) half, in percent; nil until it has reported over the split link.
+    /// While it is on USB this is also its last reading taken on battery.
     var right: Int?
+    var rightOnUSB: Bool
 
-    /// Parses "left=78 right=15", "left=78 usb right=--", "left=usb right=--" and so on.
+    /// Parses "left=78 right=15", "left=78 usb right=--", "left=usb right=15 usb" and so on.
     init?(line: String) {
         let tokens = line.split(separator: " ").map(String.init)
         guard let leftIndex = tokens.firstIndex(where: { $0.hasPrefix("left=") }),
-              let rightToken = tokens.first(where: { $0.hasPrefix("right=") })
+              let rightIndex = tokens.firstIndex(where: { $0.hasPrefix("right=") })
         else { return nil }
+        let rightToken = tokens[rightIndex]
 
         let leftValue = String(tokens[leftIndex].dropFirst("left=".count))
         if leftValue == "usb" {
@@ -86,16 +90,19 @@ struct BatterySnapshot: Equatable {
         let rightValue = String(rightToken.dropFirst("right=".count))
         if rightValue == "--" {
             right = nil
+            rightOnUSB = false
         } else {
             guard let value = Int(rightValue) else { return nil }
             right = value
+            rightOnUSB = tokens.count > rightIndex + 1 && tokens[rightIndex + 1] == "usb"
         }
     }
 
-    init(left: Int?, leftOnUSB: Bool, right: Int?) {
+    init(left: Int?, leftOnUSB: Bool, right: Int?, rightOnUSB: Bool = false) {
         self.left = left
         self.leftOnUSB = leftOnUSB
         self.right = right
+        self.rightOnUSB = rightOnUSB
     }
 
     /// The snapshot in a battery frame payload ('K' or legacy 'B'), or nil for any other frame.

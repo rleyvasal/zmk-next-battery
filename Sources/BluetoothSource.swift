@@ -7,6 +7,7 @@
 // split keyboard (headphones, mice) and is ignored. The keyboard is already connected to macOS
 // as a keyboard, so it is found among connected peripherals rather than by scanning. Levels are
 // subscribed to, not polled, and re-read every few minutes in case a notification is missed.
+// A Battery Level Status (0x2BED) in the same service says whether that level's half is charging.
 import CoreBluetooth
 import Foundation
 
@@ -14,6 +15,7 @@ final class BluetoothSource: NSObject, CBCentralManagerDelegate, CBPeripheralDel
     static let batteryService = CBUUID(string: "180F")
     static let hidService = CBUUID(string: "1812")
     static let batteryLevel = CBUUID(string: "2A19")
+    static let batteryLevelStatus = CBUUID(string: "2BED")
     static let userDescription = CBUUID(string: "2901")
     static let rescanInterval: TimeInterval = 30
     static let rereadInterval: TimeInterval = 5 * 60
@@ -25,6 +27,8 @@ final class BluetoothSource: NSObject, CBCentralManagerDelegate, CBPeripheralDel
     private var descriptions: [ObjectIdentifier: String?] = [:]
     /// Latest value of each battery level, kept until its half can be decided.
     private var levels: [ObjectIdentifier: UInt8] = [:]
+    /// Charging state of each battery level, from the Battery Level Status in its service.
+    private var charging: [ObjectIdentifier: Bool] = [:]
     private var rescanTimer: Timer?
     private var rereadTimer: Timer?
 
@@ -105,6 +109,7 @@ final class BluetoothSource: NSObject, CBCentralManagerDelegate, CBPeripheralDel
         for characteristic in batteryLevels(of: peripheral) {
             descriptions[ObjectIdentifier(characteristic)] = nil
             levels[ObjectIdentifier(characteristic)] = nil
+            charging[ObjectIdentifier(characteristic)] = nil
         }
         if keyboards.isEmpty { setStatus("Not connected to this Mac") }
     }
@@ -114,9 +119,14 @@ final class BluetoothSource: NSObject, CBCentralManagerDelegate, CBPeripheralDel
             .filter { $0.uuid == Self.batteryLevel }
     }
 
+    private func batteryStatuses(of peripheral: CBPeripheral) -> [CBCharacteristic] {
+        (peripheral.services ?? []).flatMap { $0.characteristics ?? [] }
+            .filter { $0.uuid == Self.batteryLevelStatus }
+    }
+
     private func rereadAll() {
         for peripheral in keyboards.values where peripheral.state == .connected {
-            for characteristic in batteryLevels(of: peripheral) {
+            for characteristic in batteryLevels(of: peripheral) + batteryStatuses(of: peripheral) {
                 peripheral.readValue(for: characteristic)
             }
         }
@@ -127,15 +137,21 @@ final class BluetoothSource: NSObject, CBCentralManagerDelegate, CBPeripheralDel
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         log.notice("Bluetooth: \(peripheral.services?.count ?? 0) battery services on \(peripheral.name ?? "?", privacy: .public) error=\(String(describing: error), privacy: .public)")
         for service in peripheral.services ?? [] where service.uuid == Self.batteryService {
-            peripheral.discoverCharacteristics([Self.batteryLevel], for: service)
+            peripheral.discoverCharacteristics([Self.batteryLevel, Self.batteryLevelStatus], for: service)
         }
     }
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService,
                     error: Error?) {
-        for characteristic in service.characteristics ?? []
-        where characteristic.uuid == Self.batteryLevel {
-            peripheral.discoverDescriptors(for: characteristic)
+        for characteristic in service.characteristics ?? [] {
+            if characteristic.uuid == Self.batteryLevel {
+                peripheral.discoverDescriptors(for: characteristic)
+            } else if characteristic.uuid == Self.batteryLevelStatus {
+                if characteristic.properties.contains(.notify) {
+                    peripheral.setNotifyValue(true, for: characteristic)
+                }
+                peripheral.readValue(for: characteristic)
+            }
         }
     }
 
@@ -173,6 +189,17 @@ final class BluetoothSource: NSObject, CBCentralManagerDelegate, CBPeripheralDel
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic,
                     error: Error?) {
+        if characteristic.uuid == Self.batteryLevelStatus {
+            guard error == nil, let value = characteristic.value,
+                  let level = characteristic.service?.characteristics?
+                      .first(where: { $0.uuid == Self.batteryLevel })
+            else { return }
+            let state = BatteryLevelStatus.charging(Array(value))
+            log.notice("Bluetooth: level status charging=\(String(describing: state), privacy: .public)")
+            charging[ObjectIdentifier(level)] = state
+            publish(peripheral)
+            return
+        }
         guard error == nil, characteristic.uuid == Self.batteryLevel,
               let byte = characteristic.value?.first
         else {
@@ -197,8 +224,9 @@ final class BluetoothSource: NSObject, CBCentralManagerDelegate, CBPeripheralDel
                   let level = levels[ObjectIdentifier(characteristic)]
             else { continue }
             shown = true
+            let isCharging = charging[ObjectIdentifier(characteristic)] ?? false
             DispatchQueue.main.async { [model] in
-                model.update(half, percent: Int(level), charging: false, source: .bluetooth)
+                model.update(half, percent: Int(level), charging: isCharging, source: .bluetooth)
             }
         }
         if shown { setStatus("Connected to \(peripheral.name ?? "keyboard")") }

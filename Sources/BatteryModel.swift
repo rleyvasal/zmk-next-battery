@@ -19,7 +19,7 @@ enum Source: String {
 
 struct Reading: Equatable {
     var percent: Int
-    /// The left half is on USB: the percent is its last reading on battery, and it is charging.
+    /// The half is on USB: the percent is its last reading on battery, and it is charging.
     var charging: Bool
     var source: Source
     var updated: Date
@@ -66,9 +66,14 @@ final class BatteryModel: ObservableObject {
     }
 
     private var alerts = LowBatteryAlerts()
+    /// False in the unit tests, which run outside an app bundle where UserNotifications traps.
+    private let canNotify: Bool
 
-    init() {
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+    init(notifications: Bool = true) {
+        canNotify = notifications
+        if notifications {
+            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        }
     }
 
     func update(_ half: Half, percent: Int, charging: Bool, source: Source) {
@@ -91,7 +96,7 @@ final class BatteryModel: ObservableObject {
             readings[.left] = existing
         }
         if let right = snapshot.right {
-            update(.right, percent: right, charging: false, source: .usb)
+            update(.right, percent: right, charging: snapshot.rightOnUSB, source: .usb)
         } else {
             rightLinked = false
         }
@@ -142,7 +147,7 @@ final class BatteryModel: ObservableObject {
     }
 
     private func notifyLow(half: Half, percent: Int, threshold: Int) {
-        guard notificationsEnabled else { return }
+        guard canNotify, notificationsEnabled else { return }
         let content = UNMutableNotificationContent()
         content.title = "\(half.rawValue) half at \(percent)%"
         content.body = threshold <= 10
