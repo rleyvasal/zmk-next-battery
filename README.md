@@ -11,8 +11,13 @@ It reads the battery from whichever connection is live:
 | USB | The ZMK Studio serial port: a `G` `1` request, answered with a `K` battery frame. It needs [zmk-studio-log](https://github.com/rleyvasal/zmk-studio-log) firmware that handles `G`, as Totem's does. |
 
 Every reading shows its source and age. A reading older than 15 minutes gets a `?`, a level at
-or below 20% gets a `!`, and `⚡` means the left half is on USB. A charging half's cell can't be
+or below 20% gets a `!`, and `⚡` means that half is on USB. A charging half's cell can't be
 measured, so the number shown is its last reading on battery.
+
+The right half's charging state needs firmware with `CONFIG_ZMK_BATTERY_CHARGE_STATUS`
+([zmk-totem](https://github.com/rleyvasal/zmk-totem) branch `right-charge-state`). The right half
+publishes a Battery Level Status (0x2BED), and the left half relays it: `right=NN usb` in the `K`
+frame, and a 0x2BED next to the right half's level in its Bluetooth Battery Service.
 
 ## Build and run
 
