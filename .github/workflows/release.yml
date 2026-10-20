@@ -1,0 +1,35 @@
+name: Release
+
+# Pushing a vX.Y.Z tag runs the tests, builds a universal ZMK Battery.app and
+# attaches it, zipped, to a GitHub release for that tag.
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Test
+        run: ./build.sh test
+      - name: Build
+        run: ./build.sh release "${GITHUB_REF_NAME#v}"
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" "build/ZMK-Battery-${GITHUB_REF_NAME#v}.zip" \
+            --title "ZMK Battery ${GITHUB_REF_NAME}" --notes-file - <<'NOTES'
+          Download the zip, unzip it and move **ZMK Battery.app** to Applications.
+
+          The app is not notarized by Apple, so the first launch is blocked: open
+          **System Settings › Privacy & Security** and click **Open Anyway**. Then allow
+          Bluetooth access and notifications.
+
+          Runs on macOS 13 or later, on Apple silicon and Intel Macs.
+          NOTES
