@@ -71,6 +71,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         for half in Half.allCases {
             menu.addItem(info(model.line(for: half)))
         }
+        if let warning = model.criticalWarning {
+            menu.addItem(info(warning))
+        }
         if !model.rightLinked {
             menu.addItem(info("Right half isn't linked to the left half"))
         }
@@ -78,7 +81,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(info("USB: \(model.usbStatus)"))
         menu.addItem(info("Bluetooth: \(model.bluetoothStatus)"))
         menu.addItem(.separator())
-        let alerts = NSMenuItem(title: "Low-battery alerts (20% and 10%)",
+        let alerts = NSMenuItem(title: "Low-battery alerts (\(LowBatteryAlerts.lowAt)% and \(LowBatteryAlerts.criticalAt)%)",
                                 action: #selector(toggleAlerts), keyEquivalent: "")
         alerts.state = model.notificationsEnabled ? .on : .off
         alerts.target = self
@@ -140,6 +143,9 @@ struct BatteryPanel: View {
                 ForEach(Half.allCases, id: \.self) { half in
                     Text(model.line(for: half))
                 }
+                if let warning = model.criticalWarning {
+                    Text(warning).foregroundStyle(.red)
+                }
                 if !model.rightLinked {
                     Text("Right half isn't linked to the left half").foregroundStyle(.orange)
                 }
@@ -147,7 +153,7 @@ struct BatteryPanel: View {
                 Text("USB: \(model.usbStatus)").foregroundStyle(.secondary)
                 Text("Bluetooth: \(model.bluetoothStatus)").foregroundStyle(.secondary)
                 Divider()
-                Toggle("Low-battery alerts (20% and 10%)", isOn: $model.notificationsEnabled)
+                Toggle("Low-battery alerts (\(LowBatteryAlerts.lowAt)% and \(LowBatteryAlerts.criticalAt)%)", isOn: $model.notificationsEnabled)
                 HStack {
                     Button("Refresh now", action: refresh)
                     Spacer()
