@@ -1,7 +1,7 @@
 # ZMK Battery
 
 A macOS menu bar app that shows the battery of **both halves** of a ZMK split keyboard,
-for example `L 78% R 30%!`, and notifies you when either half drops to 35% and again at 25%,
+for example `L 78% R 18%!`, and notifies you when either half drops to 20% and again at 10%,
 where it shows `⚠️` and asks you to charge that half now.
 
 It reads the battery from whichever connection is live:
@@ -12,14 +12,15 @@ It reads the battery from whichever connection is live:
 | USB | The ZMK Studio serial port: a `G` `1` request, answered with a `K` battery frame. It needs [ZMK Next](https://github.com/rleyvasal/zmk-next) firmware with the [zmk-studio-log](https://github.com/rleyvasal/zmk-studio-log) module, as in ZMK Next's quick start. |
 
 Every reading shows its source and age. A reading older than 15 minutes gets a `?`, a level at
-or below 35% gets a `!`, one at or below 25% gets `⚠️` and a "charge now" line in the menu and
+or below 20% gets a `!`, one at or below 10% gets `⚠️` and a "charge now" line in the menu and
 window, and `⚡` means that half is on USB. A charging half's cell can't be
 measured, so the number shown is its last reading on battery.
 
-The thresholds are higher than they look because of how ZMK reports the level: a straight line
-from 3.45 V (0%) to 4.2 V (100%). A LiPo drops steeply below about 3.65 V, so the low end reads
-high. A reported 25% is about 3.64 V, roughly 8-10% of real charge, and a Totem's right half
-started lagging and dropping the split link at a reported 22-26%.
+The thresholds expect the keyboard to report its level from a LiPo discharge curve, as ZMK Next
+does with `CONFIG_ZMK_BATTERY_LIPO_DISCHARGE_CURVE`. ZMK's default is a straight line from 3.45 V
+(0%) to 4.2 V (100%), which reads high near empty: there 10% is about 3.52 V. A Totem's right
+half started lagging and dropping the split link at about 3.61-3.64 V, which is 5-7% on the
+curve but 22-26% on the straight line. Without the curve, a 10% warning comes too late.
 
 The right half's charging state needs ZMK Next firmware with `CONFIG_ZMK_BATTERY_CHARGE_STATUS`
 on both halves. The right half
