@@ -27,17 +27,17 @@ struct Reading: Equatable {
 
 /// Pure bookkeeping for low-battery alerts, kept apart from UserNotifications so it can be tested.
 ///
-/// The thresholds are on the scale the firmware reports, not the cell's real charge. ZMK maps
-/// voltage to percent with a straight line from 3.45 V (0%) to 4.2 V (100%), but a LiPo drops
-/// steeply below about 3.65 V, so the low end reads high: a reported 25% is about 3.64 V, roughly
-/// 8-10% of real charge. On a Totem the right half started lagging and dropping the split link
-/// at a reported 22-26%, so the critical warning sits at 25%. If the firmware moves to a real
-/// discharge curve, lower these to about 20 and 8.
+/// The thresholds assume the firmware reports the level from a LiPo discharge curve
+/// (ZMK Next's CONFIG_ZMK_BATTERY_LIPO_DISCHARGE_CURVE), where 10% is about 3.69 V. On a Totem
+/// the right half started lagging and dropping the split link at about 3.61-3.64 V (5-7% on
+/// the curve), so the charge-now warning at 10% comes just before that. ZMK's default straight
+/// line from 3.45 V to 4.2 V reads high near empty: there 10% is about 3.52 V, past that point,
+/// so on firmware without the curve raise these to about 35 and 25.
 struct LowBatteryAlerts {
-    /// Getting low: about 20% of real charge.
-    static let lowAt = 35
-    /// Charge now: about 8-10% of real charge, where the split link starts to fail.
-    static let criticalAt = 25
+    /// Getting low.
+    static let lowAt = 20
+    /// Charge now: just above where the split link starts to fail.
+    static let criticalAt = 10
     static let thresholds = [lowAt, criticalAt]
     /// Re-arm a threshold once the level is this far above it again, so a reading that
     /// wobbles around a threshold doesn't notify over and over.
