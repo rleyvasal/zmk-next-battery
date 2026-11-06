@@ -26,10 +26,21 @@ struct Reading: Equatable {
 }
 
 /// Pure bookkeeping for low-battery alerts, kept apart from UserNotifications so it can be tested.
+///
+/// The thresholds are on the scale the firmware reports, not the cell's real charge. ZMK maps
+/// voltage to percent with a straight line from 3.45 V (0%) to 4.2 V (100%), but a LiPo drops
+/// steeply below about 3.65 V, so the low end reads high: a reported 25% is about 3.64 V, roughly
+/// 8-10% of real charge. On a Totem the right half started lagging and dropping the split link
+/// at a reported 22-26%, so the critical warning sits at 25%. If the firmware moves to a real
+/// discharge curve, lower these to about 20 and 8.
 struct LowBatteryAlerts {
-    static let thresholds = [20, 10]
+    /// Getting low: about 20% of real charge.
+    static let lowAt = 35
+    /// Charge now: about 8-10% of real charge, where the split link starts to fail.
+    static let criticalAt = 25
+    static let thresholds = [lowAt, criticalAt]
     /// Re-arm a threshold once the level is this far above it again, so a reading that
-    /// wobbles around 20% doesn't notify over and over.
+    /// wobbles around a threshold doesn't notify over and over.
     static let hysteresis = 5
 
     private var fired: [Half: Set<Int>] = [:]
@@ -126,11 +137,30 @@ final class BatteryModel: ObservableObject {
         return text
     }
 
+    /// Off USB and at or below the critical level, where the keyboard may start lagging.
+    func isCritical(_ reading: Reading) -> Bool {
+        !reading.charging && reading.percent <= LowBatteryAlerts.criticalAt
+    }
+
+    /// Halves that need charging now, for the warning in the menu and window.
+    var criticalHalves: [Half] {
+        Half.allCases.filter { half in readings[half].map(isCritical) ?? false }
+    }
+
+    /// e.g. "⚠️ Charge the right half now: it may lag or drop the split link." nil if none.
+    var criticalWarning: String? {
+        let halves = criticalHalves
+        guard !halves.isEmpty else { return nil }
+        let which = halves.count == 2 ? "both halves" : "the \(halves[0].rawValue.lowercased()) half"
+        return "⚠️ Charge \(which) now: below \(LowBatteryAlerts.criticalAt)% the keyboard may lag or drop the split link."
+    }
+
     func isStale(_ reading: Reading, now: Date = Date()) -> Bool {
         now.timeIntervalSince(reading.updated) > Self.staleAfter
     }
 
-    /// Compact menu bar text, e.g. "L 78%⚡ R 15%!". A trailing "?" marks a stale reading.
+    /// Compact menu bar text, e.g. "L 78%⚡ R 30%!" or "L 78% R 22%⚠️". A trailing "?" marks a
+    /// stale reading, "!" a low one and "⚠️" one low enough to need charging now.
     var title: String {
         func part(_ half: Half, _ letter: String) -> String {
             guard let r = readings[half] else { return "\(letter) --" }
@@ -138,7 +168,9 @@ final class BatteryModel: ObservableObject {
             if r.charging { text += "⚡" }
             if isStale(r) {
                 text += "?"
-            } else if !r.charging && r.percent <= LowBatteryAlerts.thresholds[0] {
+            } else if isCritical(r) {
+                text += "⚠️"
+            } else if !r.charging && r.percent <= LowBatteryAlerts.lowAt {
                 text += "!"
             }
             return text
@@ -150,8 +182,8 @@ final class BatteryModel: ObservableObject {
         guard canNotify, notificationsEnabled else { return }
         let content = UNMutableNotificationContent()
         content.title = "\(half.rawValue) half at \(percent)%"
-        content.body = threshold <= 10
-            ? "Charge the \(half.rawValue.lowercased()) half soon; it may drop the split link."
+        content.body = threshold <= LowBatteryAlerts.criticalAt
+            ? "⚠️ Charge the \(half.rawValue.lowercased()) half now: it may lag or drop the split link."
             : "The \(half.rawValue.lowercased()) half of your keyboard is getting low."
         content.sound = .default
         let request = UNNotificationRequest(identifier: "low-\(half.rawValue)-\(threshold)",
